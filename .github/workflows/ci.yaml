@@ -1,8 +1,10 @@
 name: ci
 
-# Keyed by ref, so a push on one branch never cancels the run of another.
+# Keyed by branch name, so a push on one branch never cancels the run of another — and so the push
+# and pull_request runs of the same branch collapse into one group instead of both executing.
+# github.ref_name is the bare branch on a push, github.head_ref the bare source branch on a PR.
 concurrency:
-    group: ci-${{ github.ref }}
+    group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
     cancel-in-progress: true
 
 on:
@@ -77,14 +79,18 @@ jobs:
             - name: Check PHP Version
               run: php -v
 
+            # --dev would *move* these out of require, so the matrix would never verify that the
+            # declared production constraints admit the pinned version — the whole point of it.
+            # twig-bridge is the only one that genuinely lives in require-dev.
             - name: Pin the Symfony version
               run: |
-                  composer require --dev --no-update --no-interaction \
+                  composer require --no-update --no-interaction \
                       "symfony/framework-bundle:${{ matrix.symfony }}" \
                       "symfony/form:${{ matrix.symfony }}" \
                       "symfony/validator:${{ matrix.symfony }}" \
                       "symfony/http-foundation:${{ matrix.symfony }}" \
-                      "symfony/http-client:${{ matrix.symfony }}" \
+                      "symfony/http-client:${{ matrix.symfony }}"
+                  composer require --dev --no-update --no-interaction \
                       "symfony/twig-bridge:${{ matrix.symfony }}"
 
             - name: Install dependencies

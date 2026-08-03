@@ -13,6 +13,8 @@ use Artack\RecaptchaEnterpriseBundle\Verifier\Verifier;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use ReflectionClass;
+use ReflectionProperty;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -51,12 +53,12 @@ final class VerifierTest extends TestCase
         self::assertSame('contact', $gateway->lastRequest->expectedAction);
     }
 
-    public function testTheClientIpAndUserAgentComeFromTheCurrentRequest(): void
+    public function testTheClientDataComesFromTheCurrentRequest(): void
     {
         $gateway = new FakeGateway(new Assessment(true));
 
         $requestStack = new RequestStack();
-        $requestStack->push(Request::create('/', server: [
+        $requestStack->push(Request::create('https://example.com/signup?step=2', server: [
             'REMOTE_ADDR' => '203.0.113.7',
             'HTTP_USER_AGENT' => 'a-user-agent',
         ]));
@@ -66,6 +68,7 @@ final class VerifierTest extends TestCase
         self::assertNotNull($gateway->lastRequest);
         self::assertSame('203.0.113.7', $gateway->lastRequest->userIpAddress);
         self::assertSame('a-user-agent', $gateway->lastRequest->userAgent);
+        self::assertSame('https://example.com/signup?step=2', $gateway->lastRequest->requestedUri);
     }
 
     public function testWithoutARequestStackTheEventCarriesNoClientData(): void
@@ -77,6 +80,7 @@ final class VerifierTest extends TestCase
         self::assertNotNull($gateway->lastRequest);
         self::assertNull($gateway->lastRequest->userIpAddress);
         self::assertNull($gateway->lastRequest->userAgent);
+        self::assertNull($gateway->lastRequest->requestedUri);
     }
 
     public function testAnEmptyTokenIsRefusedWithoutCallingTheGateway(): void
@@ -156,15 +160,18 @@ final class VerifierTest extends TestCase
         self::assertSame('Connection refused.', $result->error);
     }
 
-    public function testTheLatestResultIsExposed(): void
+    /**
+     * The verifier is a container service, so holding the last result would leak it across a
+     * long-running worker's requests and make two fields in one request ambiguous.
+     */
+    public function testTheVerifierKeepsNoStateBetweenCalls(): void
     {
-        $verifier = $this->createVerifier(new FakeGateway(new Assessment(true, null, 0.9)));
+        $mutable = array_filter(
+            (new ReflectionClass(Verifier::class))->getProperties(),
+            static fn (ReflectionProperty $property): bool => !$property->isReadOnly(),
+        );
 
-        self::assertNull($verifier->getLatestResult());
-
-        $result = $verifier->verify('a-token');
-
-        self::assertSame($result, $verifier->getLatestResult());
+        self::assertSame([], $mutable);
     }
 
     private function createVerifier(

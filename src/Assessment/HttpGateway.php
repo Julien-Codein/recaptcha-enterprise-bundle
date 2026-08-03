@@ -27,6 +27,11 @@ final readonly class HttpGateway implements GatewayInterface
 {
     private const ENDPOINT = 'https://recaptchaenterprise.googleapis.com/v1/projects/%s/assessments';
 
+    /**
+     * Everything about the transport — timeouts, proxy, TLS verification, retries, DNS — belongs
+     * to the injected client, which the bundle declares as a scoped client so an application can
+     * reconfigure all of it in one place instead of through a handful of forwarded settings.
+     */
     public function __construct(
         private HttpClientInterface $httpClient,
         private string $projectId,
@@ -69,6 +74,7 @@ final readonly class HttpGateway implements GatewayInterface
             'expectedAction' => $request->expectedAction,
             'userIpAddress' => $request->userIpAddress,
             'userAgent' => $request->userAgent,
+            'requestedUri' => $request->requestedUri,
         ];
 
         return array_filter($event, static fn (?string $value): bool => null !== $value && '' !== $value);
@@ -95,7 +101,7 @@ final readonly class HttpGateway implements GatewayInterface
 
         if (!$valid) {
             $rawReason = $tokenProperties['invalidReason'] ?? null;
-            $invalidReason = InvalidReason::fromName(is_string($rawReason) ? $rawReason : null);
+            $invalidReason = InvalidReason::fromApiValue(is_string($rawReason) ? $rawReason : null);
         }
 
         // No risk analysis at all is a different fact from a score of zero, so it stays null.

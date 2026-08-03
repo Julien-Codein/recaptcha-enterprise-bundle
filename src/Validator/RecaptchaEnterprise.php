@@ -20,7 +20,7 @@ final class RecaptchaEnterprise extends Constraint
         self::UNAVAILABLE_ERROR => 'UNAVAILABLE_ERROR',
     ];
 
-    public string $message = 'You may be sending automated requests.';
+    public string $message = 'The captcha did not validate.';
 
     public ?float $minScore = null;
     public ?string $actionName = null;

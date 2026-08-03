@@ -18,5 +18,6 @@ final readonly class AssessmentRequest
         public ?string $expectedAction = null,
         public ?string $userIpAddress = null,
         public ?string $userAgent = null,
+        public ?string $requestedUri = null,
     ) {}
 }

@@ -14,6 +14,8 @@ parameters:
   # version does not necessarily match on another.
   reportUnmatchedIgnoredErrors: false
 
+  # Because of the setting above these two never report themselves as obsolete: re-check them by
+  # hand whenever the supported Symfony floor moves.
   ignoreErrors:
     # phpstan-symfony declares NodeBuilder as a generic class, which it is not.
     - identifier: class.notFound

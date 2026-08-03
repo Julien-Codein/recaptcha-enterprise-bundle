@@ -28,14 +28,17 @@ enum InvalidReason: string
     case DOMAIN_MISMATCH = 'DOMAIN_MISMATCH';
 
     /**
-     * Never fails: a reason Google adds later must not break an assessment.
+     * Maps what the API sent. Never fails: a reason Google adds later must not break an assessment.
+     *
+     * REST sends the enum name as a string, which is why the cases are backed by their own name;
+     * an SDK gateway would send an int and would map it here too.
      */
-    public static function fromName(?string $name): self
+    public static function fromApiValue(?string $value): self
     {
-        if (null === $name || '' === $name) {
+        if (null === $value || '' === $value) {
             return self::INVALID_REASON_UNSPECIFIED;
         }
 
-        return self::tryFrom($name) ?? self::UNKNOWN_INVALID_REASON;
+        return self::tryFrom($value) ?? self::UNKNOWN_INVALID_REASON;
     }
 }

@@ -11,6 +11,7 @@ use ReflectionClass;
 use Symfony\Bridge\Twig\Extension\FormExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bridge\Twig\Form\TwigRendererEngine;
+use Symfony\Component\Form\FormError;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormRenderer;
 use Symfony\Component\Form\Forms;
@@ -19,12 +20,13 @@ use Twig\Loader\FilesystemLoader;
 use Twig\RuntimeLoader\FactoryRuntimeLoader;
 
 use function dirname;
+use function is_string;
 
 /**
  * Renders the shipped form theme, which is the only part of the bundle the end user sees.
  *
- * The site key is deliberately free of dashes: Twig's `e('js')` escapes them to `-`, which
- * would make the assertions unreadable rather than reveal anything about the template.
+ * The site key is deliberately free of dashes: Twig's `e('js')` escapes them, which would make
+ * the assertions unreadable rather than reveal anything about the template.
  *
  * @internal
  */
@@ -36,54 +38,217 @@ final class WidgetRenderingTest extends TestCase
 
     private FormFactoryInterface $factory;
     private FormRenderer $renderer;
+    private string $challenge = RecaptchaEnterpriseType::CHALLENGE_SCORE;
+    private bool $enabled = true;
 
     protected function setUp(): void
     {
         $this->boot();
     }
 
-    public function testTheHiddenFieldAndTheLoaderAreRendered(): void
+    public function testTheScoreChallengeRendersTheInvisibleIntegration(): void
     {
         $html = $this->render();
 
         self::assertStringContainsString('type="hidden"', $html);
         self::assertStringContainsString('https://www.google.com/recaptcha/enterprise.js?render='.self::SITE_KEY, $html);
         self::assertStringContainsString("grecaptcha.enterprise.execute('".self::SITE_KEY."'", $html);
+        self::assertStringNotContainsString('grecaptcha.enterprise.render', $html);
     }
 
-    public function testTheActionNameIsRendered(): void
+    public function testTheScoreChallengeResubmitsWithTheClickedButton(): void
     {
-        $html = $this->render(['action_name' => 'contact']);
+        $html = $this->render();
 
+        self::assertStringContainsString('form.requestSubmit(submitter)', $html);
+        // The sentinel that lets the resubmit through is script state, never the field value: a
+        // stored token would be a spent one.
+        self::assertStringContainsString('if (resubmitting)', $html);
+        self::assertStringNotContainsString('if (field.value)', $html);
+    }
+
+    public function testTheScoreChallengeWaitsForTheLibraryBeforeSubmitting(): void
+    {
+        $html = $this->render();
+
+        // Calling grecaptcha.enterprise.ready() directly throws when the loader has not landed,
+        // which would leave the form prevented and silently dead.
+        self::assertStringContainsString('window.___artackRecaptcha.whenReady(', $html);
+        self::assertStringNotContainsString('grecaptcha.enterprise.ready(function', $html);
+    }
+
+    public function testTheScoreChallengeHandlesAFailedExecution(): void
+    {
+        $html = $this->render();
+
+        self::assertStringContainsString('.catch(abandon)', $html);
+        // A loader that never arrives must not take the submission down with it.
+        self::assertStringContainsString('window.setTimeout(abandon', $html);
+        self::assertStringContainsString("new CustomEvent('artack-recaptcha:error'", $html);
+    }
+
+    public function testTheScoreChallengeOmitsAnAbsentAction(): void
+    {
+        self::assertStringContainsString(
+            "grecaptcha.enterprise.execute('".self::SITE_KEY."')",
+            $this->render(),
+        );
+
+        self::assertStringContainsString(
+            "grecaptcha.enterprise.execute('".self::SITE_KEY."', {action: 'contact'})",
+            $this->render(['action_name' => 'contact']),
+        );
+    }
+
+    public function testTheScoreChallengeIsTheDefault(): void
+    {
+        self::assertSame($this->render(), $this->render(['challenge' => 'score']));
+    }
+
+    public function testTheCheckboxChallengeRendersTheExplicitIntegration(): void
+    {
+        $html = $this->render([
+            'challenge' => 'checkbox',
+            'action_name' => 'contact',
+            'theme' => 'dark',
+            'size' => 'compact',
+        ]);
+
+        self::assertStringContainsString('type="hidden"', $html);
+        self::assertStringContainsString('_widget" class="recaptcha-enterprise__widget"', $html);
+        self::assertStringContainsString('render=explicit', $html);
+        self::assertStringContainsString('onload=___artackRecaptchaOnload', $html);
+        self::assertStringContainsString("sitekey: '".self::SITE_KEY."'", $html);
         self::assertStringContainsString("action: 'contact'", $html);
+        self::assertStringContainsString("theme: 'dark'", $html);
+        self::assertStringContainsString("size: 'compact'", $html);
+        self::assertStringNotContainsString('grecaptcha.enterprise.execute', $html);
+    }
+
+    public function testTheCheckboxChallengeClearsTheFieldWhenTheTokenExpires(): void
+    {
+        $html = $this->render(['challenge' => 'checkbox']);
+
+        self::assertStringContainsString("'expired-callback'", $html);
+        self::assertStringContainsString("'error-callback'", $html);
+    }
+
+    /**
+     * Google supports exactly one enterprise.js per page, so both challenges must dedupe it —
+     * two score fields on one page is enough to break it.
+     */
+    public function testBothChallengesGuardAgainstASecondLoader(): void
+    {
+        foreach (['score', 'checkbox'] as $challenge) {
+            $html = $this->render(['challenge' => $challenge]);
+
+            self::assertStringContainsString('script[data-artack-recaptcha-enterprise]', $html);
+            self::assertStringContainsString('onload=___artackRecaptchaOnload', $html);
+            self::assertStringContainsString('window.___artackRecaptcha', $html);
+        }
+    }
+
+    public function testTheCheckboxChallengeOmitsAnAbsentAction(): void
+    {
+        $html = $this->render(['challenge' => 'checkbox']);
+
+        self::assertStringNotContainsString('action:', $html);
     }
 
     public function testTheLocaleIsPassedToTheLoader(): void
     {
-        $html = $this->render(['locale' => 'fr']);
-
-        self::assertStringContainsString('hl=fr', $html);
+        self::assertStringContainsString('hl=fr', $this->render(['locale' => 'fr']));
+        self::assertStringContainsString('hl=fr', $this->render(['challenge' => 'checkbox', 'locale' => 'fr']));
     }
 
-    public function testCspNonceIsAppliedToEveryScript(): void
+    public function testWithoutALocaleGoogleDetectsIt(): void
     {
-        $html = $this->render(['script_csp_nonce' => 'anonce123']);
-
-        self::assertSame(2, mb_substr_count($html, 'nonce="anonce123"'));
+        foreach (['score', 'checkbox'] as $challenge) {
+            self::assertStringNotContainsString('hl=', $this->render(['challenge' => $challenge]));
+        }
     }
 
-    public function testDisabledBundleRendersOnlyTheHiddenField(): void
+    public function testTheCspNonceIsAppliedToEveryScript(): void
+    {
+        foreach (['score', 'checkbox'] as $challenge) {
+            $html = $this->render(['challenge' => $challenge, 'script_csp_nonce' => 'anonce123']);
+
+            // The bootstrap and the field script, both inline.
+            self::assertSame(2, mb_substr_count($html, 'nonce="anonce123"'));
+            // The loader is injected at runtime, so it gets the nonce through setAttribute.
+            self::assertStringContainsString("loader.setAttribute('nonce', 'anonce123')", $html);
+        }
+    }
+
+    /**
+     * Google refuses a replayed token with DUPE. Re-rendering the stored one would make every
+     * further attempt fail, locking the user out of the form for good.
+     */
+    public function testASubmittedFormNeverRendersTheSpentToken(): void
+    {
+        foreach (['score', 'checkbox'] as $challenge) {
+            $this->boot(challenge: $challenge);
+
+            $form = $this->factory->create(RecaptchaEnterpriseType::class);
+            $form->submit('aspenttoken123');
+
+            $html = $this->renderer->searchAndRenderBlock($form->createView(), 'widget');
+
+            self::assertStringNotContainsString('aspenttoken123', $html);
+            self::assertStringNotContainsString('value=', $html);
+            // A browser restoring form state on back-navigation is the other way it comes back.
+            self::assertStringContainsString("field.value = ''", $html);
+        }
+    }
+
+    /**
+     * The field inherits from HiddenType, whose hidden_row block renders the widget alone. Without
+     * a row block of our own the violation is raised and then silently dropped, so the visitor is
+     * refused with no message at all.
+     */
+    public function testTheViolationIsRendered(): void
+    {
+        foreach (['score', 'checkbox'] as $challenge) {
+            $this->boot(challenge: $challenge);
+
+            $form = $this->factory->create(RecaptchaEnterpriseType::class);
+            $form->submit('');
+            $form->addError(new FormError('The captcha did not validate.'));
+
+            $html = $this->renderer->searchAndRenderBlock($form->createView(), 'row');
+
+            self::assertStringContainsString('The captcha did not validate.', $html);
+            self::assertStringContainsString('type="hidden"', $html);
+        }
+    }
+
+    public function testADisabledBundleRendersOnlyTheHiddenField(): void
     {
         $this->boot(enabled: false);
 
-        $html = $this->render();
+        foreach (['score', 'checkbox'] as $challenge) {
+            $html = $this->render(['challenge' => $challenge]);
 
-        self::assertStringContainsString('type="hidden"', $html);
-        self::assertStringNotContainsString('<script', $html);
+            self::assertStringContainsString('type="hidden"', $html);
+            self::assertStringNotContainsString('<script', $html);
+        }
     }
 
-    private function boot(bool $enabled = true): void
+    public function testTheConfiguredDefaultChallengeIsUsed(): void
     {
+        $this->boot(challenge: RecaptchaEnterpriseType::CHALLENGE_CHECKBOX);
+
+        self::assertStringContainsString('render=explicit', $this->render());
+    }
+
+    private function boot(
+        bool $enabled = true,
+        string $challenge = RecaptchaEnterpriseType::CHALLENGE_SCORE,
+        ?string $locale = null,
+    ): void {
+        $this->challenge = $challenge;
+        $this->enabled = $enabled;
+
         $twig = new Environment(new FilesystemLoader([
             __DIR__.'/../../src/Resources/views',
             dirname((new ReflectionClass(FormExtension::class))->getFileName() ?: '').'/../Resources/views/Form',
@@ -99,16 +264,27 @@ final class WidgetRenderingTest extends TestCase
         ]));
 
         $this->factory = Forms::createFormFactoryBuilder()
-            ->addType(new RecaptchaEnterpriseType(self::SITE_KEY, $enabled))
+            ->addType(new RecaptchaEnterpriseType(self::SITE_KEY, $enabled, $challenge, $locale))
             ->getFormFactory()
         ;
     }
 
     /**
+     * `challenge` and `locale` are bundle settings rather than field options, so they are applied
+     * by rebuilding the type instead of being passed to the field.
+     *
      * @param array<string, mixed> $options
      */
     private function render(array $options = []): string
     {
+        $challenge = is_string($options['challenge'] ?? null) ? (string) $options['challenge'] : null;
+        $locale = is_string($options['locale'] ?? null) ? (string) $options['locale'] : null;
+        unset($options['challenge'], $options['locale']);
+
+        if (null !== $challenge || null !== $locale) {
+            $this->boot($this->enabled, $challenge ?? $this->challenge, $locale);
+        }
+
         $view = $this->factory->create(RecaptchaEnterpriseType::class, null, $options)->createView();
 
         return $this->renderer->searchAndRenderBlock($view, 'widget');

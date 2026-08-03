@@ -1,22 +1,232 @@
+{#
+    Two challenges, two blocks, so an application can override one without touching the other.
+    They are not interchangeable: each needs its own kind of site key in the Google console.
+#}
+{#
+    The field inherits from HiddenType, whose hidden_row block renders the widget alone — so without
+    this the violation is raised, attached to the field, and never shown. Errors do not bubble to
+    the parent form either, since error_bubbling defaults to false on a non-compound field.
+#}
+{% block recaptcha_enterprise_row %}
+    {{- form_errors(form) -}}
+    {{- form_widget(form) -}}
+{% endblock %}
+
 {% block recaptcha_enterprise_widget %}
+    {%- if form.vars.challenge == 'checkbox' -%}
+        {{- block('recaptcha_enterprise_checkbox_widget') -}}
+    {%- else -%}
+        {{- block('recaptcha_enterprise_score_widget') -}}
+    {%- endif -%}
+{% endblock %}
+
+{#
+    Shared by both challenges. Google supports exactly one enterprise.js per page, so the loader is
+    injected once and every field waits on the same queue. The caller sets `recaptcha_render` to the
+    value of the loader's render= parameter, which is the site key for the score challenge and
+    `explicit` for the checkbox one.
+
+    `hl` is omitted unless the bundle sets a locale, which lets Google detect it from the browser.
+#}
+{% block recaptcha_enterprise_bootstrap %}
+    <script {% if form.vars.script_csp_nonce %}nonce="{{ form.vars.script_csp_nonce }}"{% endif %}>
+        (function () {
+            if (!window.___artackRecaptcha) {
+                var state = {queue: [], loaded: false};
+
+                window.___artackRecaptchaOnload = function () {
+                    state.loaded = true;
+
+                    var queue = state.queue;
+                    state.queue = [];
+                    queue.forEach(function (callback) {
+                        callback();
+                    });
+                };
+
+                window.___artackRecaptcha = {
+                    // grecaptcha.enterprise.ready() does not queue callbacks registered before the
+                    // library exists, so everything needing it goes through here instead. The
+                    // loader's onload= is the only supported readiness signal.
+                    whenReady: function (callback) {
+                        if (state.loaded || (window.grecaptcha && window.grecaptcha.enterprise)) {
+                            grecaptcha.enterprise.ready(callback);
+
+                            return;
+                        }
+
+                        state.queue.push(function () {
+                            grecaptcha.enterprise.ready(callback);
+                        });
+                    }
+                };
+            }
+
+            // Several fields on one page share a single loader; a second tag is undefined behaviour.
+            if (!document.querySelector('script[data-artack-recaptcha-enterprise]')) {
+                var loader = document.createElement('script');
+                loader.src = 'https://www.google.com/recaptcha/enterprise.js?render={{ recaptcha_render|e('js') }}{% if form.vars.locale %}&hl={{ form.vars.locale|e('js') }}{% endif %}&onload=___artackRecaptchaOnload';
+                loader.async = true;
+                loader.defer = true;
+                loader.setAttribute('data-artack-recaptcha-enterprise', '');
+                {% if form.vars.script_csp_nonce %}loader.setAttribute('nonce', '{{ form.vars.script_csp_nonce|e('js') }}');{% endif %}
+                document.head.appendChild(loader);
+            }
+        })();
+    </script>
+{% endblock %}
+
+{% block recaptcha_enterprise_score_widget %}
     {%- set type = type|default('hidden') -%}
+    {#- A re-rendered form must never carry the previous token back. Google refuses a replayed token
+        with DUPE, so the field would fail validation on every further attempt. -#}
+    {%- set value = '' -%}
     {{ block('form_widget_simple') }}
 
     {% if form.vars.enabled -%}
-        <script src="https://www.google.com/recaptcha/enterprise.js?render={{ form.vars.site_key }}&hl={{ form.vars.locale }}" async defer {% if form.vars.script_csp_nonce %}nonce="{{ form.vars.script_csp_nonce }}"{% endif %}></script>
+        {%- set recaptcha_render = form.vars.site_key -%}
+        {{ block('recaptcha_enterprise_bootstrap') }}
         <script {% if form.vars.script_csp_nonce %}nonce="{{ form.vars.script_csp_nonce }}"{% endif %}>
-            const recaptchaTokenField = document.getElementById('{{ form.vars.id }}');
-            const recaptchaForm = recaptchaTokenField.closest('form');
+            (function () {
+                var field = document.getElementById('{{ form.vars.id|e('js') }}');
+                var form = field ? field.closest('form') : null;
 
-            if (recaptchaForm) {
-                recaptchaForm.addEventListener('submit', async (event) => {
+                if (!form) {
+                    return;
+                }
+
+                // A back-navigation can have the browser restore the spent token into the field.
+                field.value = '';
+
+                var resubmitting = false;
+                var pending = false;
+
+                var resubmit = function (submitter) {
+                    resubmitting = true;
+
+                    try {
+                        // requestSubmit keeps the clicked button's name and value, and runs the
+                        // other submit listeners; submit() does neither.
+                        if (typeof form.requestSubmit === 'function') {
+                            form.requestSubmit(submitter);
+                        } else {
+                            form.submit();
+                        }
+                    } finally {
+                        resubmitting = false;
+                        pending = false;
+                    }
+                };
+
+                form.addEventListener('submit', function (event) {
+                    if (resubmitting) {
+                        return;
+                    }
+
                     event.preventDefault();
-                    grecaptcha.enterprise.ready(async () => {
-                        recaptchaTokenField.value = await grecaptcha.enterprise.execute('{{ form.vars.site_key }}', {action: '{{ form.vars.action_name }}'});
-                        recaptchaForm.submit();
+
+                    if (pending) {
+                        return;
+                    }
+
+                    pending = true;
+
+                    var submitter = event.submitter;
+                    var settled = false;
+                    var timer = null;
+
+                    var settle = function (token) {
+                        if (settled) {
+                            return;
+                        }
+
+                        settled = true;
+                        window.clearTimeout(timer);
+                        field.value = token || '';
+                        resubmit(submitter);
+                    };
+
+                    var abandon = function () {
+                        if (settled) {
+                            return;
+                        }
+
+                        // Submitting an empty token is a legitimate MISSING refusal that the server
+                        // already reports; a form left prevented with no message is not. Cancel the
+                        // event to keep the submission blocked and handle it in the application.
+                        var failure = new CustomEvent('artack-recaptcha:error', {bubbles: true, cancelable: true});
+
+                        if (form.dispatchEvent(failure)) {
+                            settle('');
+
+                            return;
+                        }
+
+                        settled = true;
+                        window.clearTimeout(timer);
+                        pending = false;
+                    };
+
+                    // The loader may never arrive — blocked, offline, or a consent manager holding
+                    // it back — and the submission must not be lost with it.
+                    timer = window.setTimeout(abandon, 10000);
+
+                    window.___artackRecaptcha.whenReady(function () {
+                        try {
+                            grecaptcha.enterprise.execute('{{ form.vars.site_key|e('js') }}'{% if form.vars.action_name %}, {action: '{{ form.vars.action_name|e('js') }}'}{% endif %}).then(settle).catch(abandon);
+                        } catch (error) {
+                            abandon();
+                        }
                     });
                 });
-            }
+            })();
         </script>
+        <noscript>{{ 'This form requires JavaScript.'|trans({}, 'validators') }}</noscript>
+    {%- endif %}
+{% endblock %}
+
+{% block recaptcha_enterprise_checkbox_widget %}
+    {%- set type = type|default('hidden') -%}
+    {#- The Google widget resets when the form is re-rendered, so a value kept here would be a spent
+        token submitted by a user who did not tick the box again. -#}
+    {%- set value = '' -%}
+    {{ block('form_widget_simple') }}
+
+    {% if form.vars.enabled -%}
+        {%- set recaptcha_render = 'explicit' -%}
+        {{ block('recaptcha_enterprise_bootstrap') }}
+        <div id="{{ form.vars.id }}_widget" class="recaptcha-enterprise__widget"></div>
+        <script {% if form.vars.script_csp_nonce %}nonce="{{ form.vars.script_csp_nonce }}"{% endif %}>
+            (function () {
+                var field = document.getElementById('{{ form.vars.id|e('js') }}');
+
+                if (!field) {
+                    return;
+                }
+
+                field.value = '';
+
+                window.___artackRecaptcha.whenReady(function () {
+                    grecaptcha.enterprise.render('{{ form.vars.id|e('js') }}_widget', {
+                        sitekey: '{{ form.vars.site_key|e('js') }}',
+                        {% if form.vars.action_name %}action: '{{ form.vars.action_name|e('js') }}',{% endif %}
+                        theme: '{{ form.vars.theme|e('js') }}',
+                        size: '{{ form.vars.size|e('js') }}',
+                        callback: function (token) {
+                            field.value = token;
+                        },
+                        // Checkbox tokens expire after about two minutes, so the stale one must
+                        // go rather than be submitted and refused.
+                        'expired-callback': function () {
+                            field.value = '';
+                        },
+                        'error-callback': function () {
+                            field.value = '';
+                        }
+                    });
+                });
+            })();
+        </script>
+        <noscript>{{ 'This form requires JavaScript.'|trans({}, 'validators') }}</noscript>
     {%- endif %}
 {% endblock %}

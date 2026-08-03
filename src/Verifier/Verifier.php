@@ -13,13 +13,13 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Decides what an assessment means. Every decision the bundle makes lives here, so a gateway only
- * ever has to translate.
+ * Decides what an assessment means, so a gateway only ever has to translate. The score threshold
+ * is the one judgement made elsewhere: it is per-constraint, so the validator owns it.
+ *
+ * Stateless on purpose — see VerifierInterface::verify().
  */
 final class Verifier implements VerifierInterface
 {
-    private ?Result $result = null;
-
     public function __construct(
         private readonly GatewayInterface $gateway,
         private readonly string $siteKey,
@@ -32,7 +32,7 @@ final class Verifier implements VerifierInterface
     {
         // Nothing to assess, and Google would only be asked to confirm it.
         if ('' === $token) {
-            return $this->result = Result::unverified(InvalidReason::MISSING);
+            return Result::unverified(InvalidReason::MISSING);
         }
 
         try {
@@ -45,15 +45,10 @@ final class Verifier implements VerifierInterface
 
             // An unreachable API says nothing about the token, so it is reported as its own fact
             // rather than disguised as an invalid one.
-            return $this->result = Result::unavailable($exception->getMessage(), !$this->denyOnError);
+            return Result::unavailable($exception->getMessage(), !$this->denyOnError);
         }
 
-        return $this->result = $this->createResult($assessment, $expectedAction);
-    }
-
-    public function getLatestResult(): ?Result
-    {
-        return $this->result;
+        return $this->createResult($assessment, $expectedAction);
     }
 
     private function createRequest(string $token, ?string $expectedAction): AssessmentRequest
@@ -64,8 +59,11 @@ final class Verifier implements VerifierInterface
             $this->siteKey,
             $token,
             $expectedAction,
+            // Behind a proxy this is the proxy unless framework.trusted_proxies is configured,
+            // which would score every visitor from one address and degrade the risk analysis.
             $request?->getClientIp(),
             $request?->headers->get('User-Agent'),
+            $request?->getUri(),
         );
     }
 

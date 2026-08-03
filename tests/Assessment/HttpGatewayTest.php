@@ -41,6 +41,29 @@ final class HttpGatewayTest extends TestCase
      */
     private array $sentBody = [];
 
+    /**
+     * @var array<mixed>
+     */
+    private array $sentOptions = [];
+
+    /**
+     * The transport belongs to the injected client, which the bundle declares as a scoped client.
+     * Setting any of it per request here would silently defeat that configuration.
+     */
+    public function testTheGatewayDoesNotOverrideTransportOptions(): void
+    {
+        $client = $this->respondWith(['tokenProperties' => ['valid' => true]])
+            ->withOptions(['timeout' => 42.0, 'max_duration' => 43.0])
+        ;
+
+        (new HttpGateway($client, self::PROJECT_ID, self::API_KEY))
+            ->assess(new AssessmentRequest(self::SITE_KEY, 'a-token'))
+        ;
+
+        self::assertSame(42.0, $this->sentOptions['timeout'] ?? null);
+        self::assertSame(43.0, $this->sentOptions['max_duration'] ?? null);
+    }
+
     public function testTheRequestIsBuiltFromTheAssessmentRequest(): void
     {
         $gateway = $this->createGateway($this->respondWith([
@@ -54,6 +77,7 @@ final class HttpGatewayTest extends TestCase
             'contact',
             '203.0.113.7',
             'a-user-agent',
+            'https://example.com/signup?step=2',
         ));
 
         self::assertStringStartsWith(
@@ -69,6 +93,7 @@ final class HttpGatewayTest extends TestCase
                 'expectedAction' => 'contact',
                 'userIpAddress' => '203.0.113.7',
                 'userAgent' => 'a-user-agent',
+                'requestedUri' => 'https://example.com/signup?step=2',
             ],
         ], $this->sentBody);
     }
@@ -241,6 +266,7 @@ final class HttpGatewayTest extends TestCase
 
             $body = $options['body'] ?? '';
             $this->sentBody = is_string($body) ? $this->decode($body) : [];
+            $this->sentOptions = $options;
 
             return new MockResponse($this->encode($payload));
         });

@@ -20,7 +20,7 @@ use Symfony\Component\Validator\Test\ConstraintValidatorTestCase;
 #[CoversClass(RecaptchaEnterprise::class)]
 final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
 {
-    private const MESSAGE = 'You may be sending automated requests.';
+    private const MESSAGE = 'The captcha did not validate.';
 
     private FakeVerifier $verifier;
     private bool $enabled = true;
@@ -46,7 +46,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation(self::MESSAGE)
             ->setParameter('{{ reason }}', 'EXPIRED')
             ->setParameter('{{ score }}', 'null')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::INVALID_TOKEN_ERROR)
             ->assertRaised()
         ;
@@ -61,7 +61,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation(self::MESSAGE)
             ->setParameter('{{ reason }}', 'NONE')
             ->setParameter('{{ score }}', '0.3')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
             ->assertRaised()
         ;
@@ -76,7 +76,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation(self::MESSAGE)
             ->setParameter('{{ reason }}', 'NONE')
             ->setParameter('{{ score }}', '0.6')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
             ->assertRaised()
         ;
@@ -92,7 +92,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation(self::MESSAGE)
             ->setParameter('{{ reason }}', 'NONE')
             ->setParameter('{{ score }}', 'null')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
             ->assertRaised()
         ;
@@ -116,7 +116,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation(self::MESSAGE)
             ->setParameter('{{ reason }}', 'NONE')
             ->setParameter('{{ score }}', 'null')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::UNAVAILABLE_ERROR)
             ->assertRaised()
         ;
@@ -141,7 +141,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         $this->buildViolation('Nope.')
             ->setParameter('{{ reason }}', 'MISSING')
             ->setParameter('{{ score }}', 'null')
-            ->setCause($this->verifier->getLatestResult())
+            ->setCause($this->verifier->nextResult)
             ->setCode(RecaptchaEnterprise::INVALID_TOKEN_ERROR)
             ->assertRaised()
         ;

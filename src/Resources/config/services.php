@@ -17,6 +17,7 @@ return static function (ContainerConfigurator $container): void {
 
     $services->set('artack_recaptcha_enterprise.gateway', HttpGateway::class)
         ->args([
+            // Replaced by the extension with the client named in http_client_service.
             service('http_client'),
             '%artack_recaptcha_enterprise.project_id%',
             '%artack_recaptcha_enterprise.api_key%',
@@ -50,6 +51,8 @@ return static function (ContainerConfigurator $container): void {
         ->args([
             '%artack_recaptcha_enterprise.site_key%',
             '%artack_recaptcha_enterprise.enabled%',
+            '%artack_recaptcha_enterprise.challenge%',
+            '%artack_recaptcha_enterprise.locale%',
         ])
         ->tag('form.type')
     ;

@@ -16,6 +16,7 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -39,6 +40,59 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
         self::assertTrue($config['enabled']);
         self::assertSame(0.5, $config['min_score']);
         self::assertSame('deny', $config['on_error']);
+        self::assertSame('score', $config['challenge']);
+        self::assertNull($config['locale']);
+        self::assertSame('artack_recaptcha_enterprise.client', $config['http_client_service']);
+    }
+
+    /**
+     * The transport is configured in one place — timeouts, proxy, TLS verification, retries — so
+     * the bundle ships a scoped client instead of forwarding those settings one by one.
+     */
+    public function testTheScopedClientIsPrependedWithTimeouts(): void
+    {
+        $container = new ContainerBuilder();
+        $container->registerExtension($this->createExtension('framework'));
+
+        (new ArtackRecaptchaEnterpriseExtension())->prepend($container);
+
+        self::assertSame([[
+            'http_client' => [
+                'scoped_clients' => [
+                    Configuration::CLIENT_SERVICE => [
+                        'base_uri' => 'https://recaptchaenterprise.googleapis.com',
+                        'timeout' => 2.0,
+                        'max_duration' => 5.0,
+                    ],
+                ],
+            ],
+        ]], $container->getExtensionConfig('framework'));
+    }
+
+    public function testTheGatewayUsesTheScopedClientByDefault(): void
+    {
+        $client = $this->load()->getDefinition('artack_recaptcha_enterprise.gateway')->getArgument(0);
+
+        self::assertInstanceOf(Reference::class, $client);
+        self::assertSame(Configuration::CLIENT_SERVICE, (string) $client);
+    }
+
+    public function testAScopedHttpClientCanBeInjected(): void
+    {
+        $client = $this->load(['http_client_service' => 'recaptcha.client'])
+            ->getDefinition('artack_recaptcha_enterprise.gateway')
+            ->getArgument(0)
+        ;
+
+        self::assertInstanceOf(Reference::class, $client);
+        self::assertSame('recaptcha.client', (string) $client);
+    }
+
+    public function testAnUnknownChallengeIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [['challenge' => 'invisible'] + self::MINIMAL_CONFIG]);
     }
 
     public function testAnUnknownErrorPolicyIsRejected(): void
@@ -91,6 +145,26 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
         self::assertTrue($container->getParameter('artack_recaptcha_enterprise.deny_on_error'));
     }
 
+    public function testTheDefaultChallengeIsBound(): void
+    {
+        self::assertSame('checkbox', $this->load(['challenge' => 'checkbox'])->getParameter('artack_recaptcha_enterprise.challenge'));
+    }
+
+    /**
+     * Both are page-wide, not per field: one enterprise.js load per page, one render= and one hl=.
+     */
+    public function testTheChallengeAndTheLocaleReachTheFormType(): void
+    {
+        $arguments = $this->load(['challenge' => 'checkbox', 'locale' => 'fr'])
+            ->getDefinition(RecaptchaEnterpriseType::class)
+            ->getArguments()
+        ;
+
+        self::assertSame('%artack_recaptcha_enterprise.challenge%', $arguments[2]);
+        self::assertSame('%artack_recaptcha_enterprise.locale%', $arguments[3]);
+        self::assertSame('fr', $this->load(['locale' => 'fr'])->getParameter('artack_recaptcha_enterprise.locale'));
+    }
+
     public function testTheOutagePolicyIsBoundAsABoolean(): void
     {
         self::assertFalse($this->load(['on_error' => 'allow'])->getParameter('artack_recaptcha_enterprise.deny_on_error'));
@@ -100,7 +174,7 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
     {
         $container = $this->load();
         $container->register('request_stack', RequestStack::class);
-        $container->register('http_client', MockHttpClient::class);
+        $container->register(Configuration::CLIENT_SERVICE, MockHttpClient::class);
         $container->getDefinition('artack_recaptcha_enterprise.verifier')->setPublic(true);
         $container->compile();
 
@@ -111,14 +185,7 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
     public function testTwigFormThemeIsPrepended(): void
     {
         $container = new ContainerBuilder();
-        $container->registerExtension(new class extends Extension {
-            public function load(array $configs, ContainerBuilder $container): void {}
-
-            public function getAlias(): string
-            {
-                return 'twig';
-            }
-        });
+        $container->registerExtension($this->createExtension('twig'));
 
         (new ArtackRecaptchaEnterpriseExtension())->prepend($container);
 
@@ -128,13 +195,31 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
         );
     }
 
-    public function testPrependIsSkippedWithoutTwig(): void
+    /**
+     * Prepending onto an extension that is not registered throws.
+     */
+    public function testPrependIsSkippedWhenTheExtensionsAreAbsent(): void
     {
         $container = new ContainerBuilder();
 
         (new ArtackRecaptchaEnterpriseExtension())->prepend($container);
 
         self::assertSame([], $container->getExtensionConfig('twig'));
+        self::assertSame([], $container->getExtensionConfig('framework'));
+    }
+
+    private function createExtension(string $alias): Extension
+    {
+        return new class($alias) extends Extension {
+            public function __construct(private readonly string $alias) {}
+
+            public function load(array $configs, ContainerBuilder $container): void {}
+
+            public function getAlias(): string
+            {
+                return $this->alias;
+            }
+        };
     }
 
     /**
