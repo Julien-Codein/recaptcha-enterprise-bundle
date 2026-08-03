@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Artack\RecaptchaEnterpriseBundle\Validator;
 
+use Artack\RecaptchaEnterpriseBundle\Verifier\Result;
 use Artack\RecaptchaEnterpriseBundle\Verifier\VerifierInterface;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
@@ -40,10 +41,45 @@ final class RecaptchaEnterpriseValidator extends ConstraintValidator
 
         $result = $this->verifier->verify($value, $constraint->actionName);
 
+        if (!$result->success) {
+            $code = null === $result->error
+                ? RecaptchaEnterprise::INVALID_TOKEN_ERROR
+                : RecaptchaEnterprise::UNAVAILABLE_ERROR;
+
+            $this->addViolation($constraint, $result, $code);
+
+            return;
+        }
+
+        // An accepted outage carries no assessment, so there is no score to hold to a threshold.
+        // The Verifier has already applied the configured policy by accepting it.
+        if (null !== $result->error) {
+            return;
+        }
+
         $minScore = $constraint->minScore ?? $this->minScore;
 
-        if (!$result->success || (null !== $result->score && $result->score < $minScore)) {
-            $this->context->buildViolation($constraint->message)->addViolation();
+        // A threshold of zero disables the risk analysis check, which is what checkbox keys
+        // without score based protection need.
+        if ($minScore <= 0.0) {
+            return;
         }
+
+        // A missing score means the assessment carried no risk analysis at all, so the threshold
+        // cannot be honoured: fail closed rather than let the request through unchecked.
+        if (null === $result->score || $result->score < $minScore) {
+            $this->addViolation($constraint, $result, RecaptchaEnterprise::LOW_SCORE_ERROR);
+        }
+    }
+
+    private function addViolation(RecaptchaEnterprise $constraint, Result $result, string $code): void
+    {
+        $this->context->buildViolation($constraint->message)
+            ->setParameter('{{ reason }}', $result->getInvalidReasonName() ?? 'NONE')
+            ->setParameter('{{ score }}', null === $result->score ? 'null' : (string) $result->score)
+            ->setCause($result)
+            ->setCode($code)
+            ->addViolation()
+        ;
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Artack\RecaptchaEnterpriseBundle\Tests\Validator;
 
+use Artack\RecaptchaEnterpriseBundle\Assessment\InvalidReason;
 use Artack\RecaptchaEnterpriseBundle\Tests\Fixtures\FakeVerifier;
 use Artack\RecaptchaEnterpriseBundle\Validator\RecaptchaEnterprise;
 use Artack\RecaptchaEnterpriseBundle\Validator\RecaptchaEnterpriseValidator;
@@ -19,13 +20,15 @@ use Symfony\Component\Validator\Test\ConstraintValidatorTestCase;
 #[CoversClass(RecaptchaEnterprise::class)]
 final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
 {
+    private const MESSAGE = 'You may be sending automated requests.';
+
     private FakeVerifier $verifier;
     private bool $enabled = true;
     private float $minScore = 0.5;
 
     public function testASuccessfulAssessmentRaisesNoViolation(): void
     {
-        $this->expect(new Result(true, true, 'contact', 0.9, []));
+        $this->expect(new Result(true, true, 'contact', 0.9));
 
         $this->validator->validate('a-token', new RecaptchaEnterprise(actionName: 'contact'));
 
@@ -34,50 +37,123 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
         self::assertSame('contact', $this->verifier->lastExpectedAction);
     }
 
-    public function testAFailedAssessmentRaisesAViolation(): void
+    public function testARefusedTokenRaisesAViolationCarryingItsReason(): void
     {
-        $this->expect(new Result(false, false, null, null, []));
+        $this->expect(Result::unverified(InvalidReason::EXPIRED));
 
         $this->validator->validate('a-token', new RecaptchaEnterprise());
 
-        $this->buildViolation('You may be sending automated requests.')->assertRaised();
+        $this->buildViolation(self::MESSAGE)
+            ->setParameter('{{ reason }}', 'EXPIRED')
+            ->setParameter('{{ score }}', 'null')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::INVALID_TOKEN_ERROR)
+            ->assertRaised()
+        ;
     }
 
-    public function testAScoreBelowTheGlobalThresholdRaisesAViolation(): void
+    public function testAScoreBelowTheGlobalThresholdRaisesALowScoreViolation(): void
     {
-        $this->expect(new Result(true, true, null, 0.3, []));
+        $this->expect(new Result(true, true, null, 0.3));
 
         $this->validator->validate('a-token', new RecaptchaEnterprise());
 
-        $this->buildViolation('You may be sending automated requests.')->assertRaised();
+        $this->buildViolation(self::MESSAGE)
+            ->setParameter('{{ reason }}', 'NONE')
+            ->setParameter('{{ score }}', '0.3')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
+            ->assertRaised()
+        ;
     }
 
     public function testTheConstraintThresholdOverridesTheGlobalOne(): void
     {
-        $this->expect(new Result(true, true, null, 0.6, []));
+        $this->expect(new Result(true, true, null, 0.6));
 
         $this->validator->validate('a-token', new RecaptchaEnterprise(minScore: 0.7));
 
-        $this->buildViolation('You may be sending automated requests.')->assertRaised();
+        $this->buildViolation(self::MESSAGE)
+            ->setParameter('{{ reason }}', 'NONE')
+            ->setParameter('{{ score }}', '0.6')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
+            ->assertRaised()
+        ;
+    }
+
+    public function testAMissingScoreFailsClosed(): void
+    {
+        // No risk analysis at all: the threshold cannot be honoured, so the token is refused.
+        $this->expect(new Result(true, true, null, null));
+
+        $this->validator->validate('a-token', new RecaptchaEnterprise());
+
+        $this->buildViolation(self::MESSAGE)
+            ->setParameter('{{ reason }}', 'NONE')
+            ->setParameter('{{ score }}', 'null')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::LOW_SCORE_ERROR)
+            ->assertRaised()
+        ;
+    }
+
+    public function testAMissingScoreIsAcceptedWhenTheThresholdIsZero(): void
+    {
+        $this->expect(new Result(true, true, null, null));
+
+        $this->validator->validate('a-token', new RecaptchaEnterprise(minScore: 0.0));
+
+        $this->assertNoViolation();
+    }
+
+    public function testADeniedOutageRaisesAnUnavailableViolation(): void
+    {
+        $this->expect(Result::unavailable('Connection refused.', false));
+
+        $this->validator->validate('a-token', new RecaptchaEnterprise());
+
+        $this->buildViolation(self::MESSAGE)
+            ->setParameter('{{ reason }}', 'NONE')
+            ->setParameter('{{ score }}', 'null')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::UNAVAILABLE_ERROR)
+            ->assertRaised()
+        ;
+    }
+
+    public function testAnAcceptedOutageSkipsTheScoreThreshold(): void
+    {
+        // There is no assessment to score, so the threshold must not refuse it after the fact.
+        $this->expect(Result::unavailable('Connection refused.', true));
+
+        $this->validator->validate('a-token', new RecaptchaEnterprise());
+
+        $this->assertNoViolation();
     }
 
     public function testACustomMessageIsUsed(): void
     {
-        $this->expect(new Result(false, false, null, null, []));
+        $this->expect(Result::unverified());
 
         $this->validator->validate('a-token', new RecaptchaEnterprise(message: 'Nope.'));
 
-        $this->buildViolation('Nope.')->assertRaised();
+        $this->buildViolation('Nope.')
+            ->setParameter('{{ reason }}', 'MISSING')
+            ->setParameter('{{ score }}', 'null')
+            ->setCause($this->verifier->getLatestResult())
+            ->setCode(RecaptchaEnterprise::INVALID_TOKEN_ERROR)
+            ->assertRaised()
+        ;
     }
 
     public function testANullTokenIsAssessedAsAnEmptyString(): void
     {
-        $this->expect(new Result(false, false, null, null, []));
+        $this->expect(Result::unverified());
 
         $this->validator->validate(null, new RecaptchaEnterprise());
 
         self::assertSame('', $this->verifier->lastToken);
-        $this->buildViolation('You may be sending automated requests.')->assertRaised();
     }
 
     public function testADisabledBundleSkipsTheAssessment(): void
@@ -102,7 +178,7 @@ final class RecaptchaEnterpriseValidatorTest extends ConstraintValidatorTestCase
     protected function createValidator(): RecaptchaEnterpriseValidator
     {
         // The answer is chosen per test, after setUp() has already built the validator.
-        $this->verifier = new FakeVerifier(new Result(false, false, null, null, []));
+        $this->verifier = new FakeVerifier(Result::unverified());
 
         return new RecaptchaEnterpriseValidator($this->verifier, $this->enabled, $this->minScore);
     }

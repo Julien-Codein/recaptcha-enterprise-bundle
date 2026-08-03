@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Artack\RecaptchaEnterpriseBundle\Tests\DependencyInjection;
 
+use Artack\RecaptchaEnterpriseBundle\Assessment\GatewayInterface;
 use Artack\RecaptchaEnterpriseBundle\DependencyInjection\ArtackRecaptchaEnterpriseExtension;
 use Artack\RecaptchaEnterpriseBundle\DependencyInjection\Configuration;
 use Artack\RecaptchaEnterpriseBundle\Form\RecaptchaEnterpriseType;
@@ -15,6 +16,7 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -36,6 +38,14 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
 
         self::assertTrue($config['enabled']);
         self::assertSame(0.5, $config['min_score']);
+        self::assertSame('deny', $config['on_error']);
+    }
+
+    public function testAnUnknownErrorPolicyIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [['on_error' => 'shrug'] + self::MINIMAL_CONFIG]);
     }
 
     public function testSiteKeyIsRequired(): void
@@ -56,6 +66,9 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
     {
         $container = $this->load();
 
+        self::assertTrue($container->hasDefinition('artack_recaptcha_enterprise.gateway'));
+        self::assertSame('artack_recaptcha_enterprise.gateway', (string) $container->getAlias(GatewayInterface::class));
+
         self::assertTrue($container->hasDefinition('artack_recaptcha_enterprise.verifier'));
         self::assertSame('artack_recaptcha_enterprise.verifier', (string) $container->getAlias(VerifierInterface::class));
 
@@ -75,12 +88,19 @@ final class ArtackRecaptchaEnterpriseExtensionTest extends TestCase
         self::assertSame('an-api-key', $container->getParameter('artack_recaptcha_enterprise.api_key'));
         self::assertSame(0.7, $container->getParameter('artack_recaptcha_enterprise.min_score'));
         self::assertFalse($container->getParameter('artack_recaptcha_enterprise.enabled'));
+        self::assertTrue($container->getParameter('artack_recaptcha_enterprise.deny_on_error'));
+    }
+
+    public function testTheOutagePolicyIsBoundAsABoolean(): void
+    {
+        self::assertFalse($this->load(['on_error' => 'allow'])->getParameter('artack_recaptcha_enterprise.deny_on_error'));
     }
 
     public function testContainerCompiles(): void
     {
         $container = $this->load();
         $container->register('request_stack', RequestStack::class);
+        $container->register('http_client', MockHttpClient::class);
         $container->getDefinition('artack_recaptcha_enterprise.verifier')->setPublic(true);
         $container->compile();
 

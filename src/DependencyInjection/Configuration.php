@@ -38,6 +38,11 @@ final class Configuration implements ConfigurationInterface
             ->info('The lowest accepted risk analysis score. 0 disables the score check.')
             ->defaultValue(0.5)
             ->end()
+            ->enumNode('on_error')
+            ->info('What to do when Google cannot be reached: deny the token, or let it through.')
+            ->values(['deny', 'allow'])
+            ->defaultValue('deny')
+            ->end()
             ->end()
         ;
 

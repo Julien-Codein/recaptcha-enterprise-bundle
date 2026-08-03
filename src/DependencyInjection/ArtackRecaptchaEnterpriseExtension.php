@@ -17,7 +17,7 @@ final class ArtackRecaptchaEnterpriseExtension extends Extension implements Prep
      */
     public function load(array $configs, ContainerBuilder $container): void
     {
-        /** @var array{enabled: bool, site_key: string, project_id: string, api_key: string, min_score: float} $config */
+        /** @var array{enabled: bool, site_key: string, project_id: string, api_key: string, min_score: float, on_error: string} $config */
         $config = $this->processConfiguration(new Configuration(), $configs);
 
         $container->setParameter('artack_recaptcha_enterprise.enabled', $config['enabled']);
@@ -25,6 +25,7 @@ final class ArtackRecaptchaEnterpriseExtension extends Extension implements Prep
         $container->setParameter('artack_recaptcha_enterprise.project_id', $config['project_id']);
         $container->setParameter('artack_recaptcha_enterprise.api_key', $config['api_key']);
         $container->setParameter('artack_recaptcha_enterprise.min_score', $config['min_score']);
+        $container->setParameter('artack_recaptcha_enterprise.deny_on_error', 'deny' === $config['on_error']);
 
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__.'/../Resources/config'));
         $loader->load('services.php');

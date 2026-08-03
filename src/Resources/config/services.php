@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
+use Artack\RecaptchaEnterpriseBundle\Assessment\GatewayInterface;
+use Artack\RecaptchaEnterpriseBundle\Assessment\HttpGateway;
 use Artack\RecaptchaEnterpriseBundle\Form\RecaptchaEnterpriseType;
-use Artack\RecaptchaEnterpriseBundle\Service\IpResolver;
-use Artack\RecaptchaEnterpriseBundle\Service\UserAgentResolver;
 use Artack\RecaptchaEnterpriseBundle\Validator\RecaptchaEnterpriseValidator;
 use Artack\RecaptchaEnterpriseBundle\Verifier\Verifier;
 use Artack\RecaptchaEnterpriseBundle\Verifier\VerifierInterface;
@@ -15,21 +15,23 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 return static function (ContainerConfigurator $container): void {
     $services = $container->services();
 
-    $services->set('artack_recaptcha_enterprise.ip_resolver', IpResolver::class)
-        ->args([service('request_stack')])
+    $services->set('artack_recaptcha_enterprise.gateway', HttpGateway::class)
+        ->args([
+            service('http_client'),
+            '%artack_recaptcha_enterprise.project_id%',
+            '%artack_recaptcha_enterprise.api_key%',
+        ])
     ;
 
-    $services->set('artack_recaptcha_enterprise.user_agent_resolver', UserAgentResolver::class)
-        ->args([service('request_stack')])
-    ;
+    $services->alias(GatewayInterface::class, 'artack_recaptcha_enterprise.gateway');
 
     $services->set('artack_recaptcha_enterprise.verifier', Verifier::class)
         ->args([
-            '%artack_recaptcha_enterprise.project_id%',
+            service('artack_recaptcha_enterprise.gateway'),
             '%artack_recaptcha_enterprise.site_key%',
-            '%artack_recaptcha_enterprise.api_key%',
-            service('artack_recaptcha_enterprise.ip_resolver'),
-            service('artack_recaptcha_enterprise.user_agent_resolver'),
+            service('request_stack')->nullOnInvalid(),
+            service('logger')->nullOnInvalid(),
+            '%artack_recaptcha_enterprise.deny_on_error%',
         ])
     ;
 
