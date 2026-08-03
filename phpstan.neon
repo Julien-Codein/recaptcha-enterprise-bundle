@@ -3,6 +3,21 @@ parameters:
 
   paths:
     - src
+    - tests
+
+  # The analysed sources must hold for every supported PHP version, whatever the runtime is.
+  phpVersion:
+    min: 80200
+    max: 80400
+
+  # The bundle supports Symfony 5.4 up to 8.x, whose stubs differ; an ignore that matches on one
+  # version does not necessarily match on another.
+  reportUnmatchedIgnoredErrors: false
 
   ignoreErrors:
-    - '#Call to an undefined method Symfony\\Component\\Config\\Definition\\Builder\\NodeDefinition::children\(\).#'
+    # phpstan-symfony declares NodeBuilder as a generic class, which it is not.
+    - identifier: class.notFound
+      path: src/DependencyInjection/Configuration.php
+    # ConstraintValidatorTestCase only became generic after Symfony 5.4.
+    - identifier: missingType.generics
+      path: tests/Validator/RecaptchaEnterpriseValidatorTest.php

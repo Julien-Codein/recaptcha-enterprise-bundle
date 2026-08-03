@@ -1,11 +1,13 @@
 name: ci
 
+# Keyed by ref, so a push on one branch never cancels the run of another.
 concurrency:
-    group: ci
+    group: ci-${{ github.ref }}
     cancel-in-progress: true
 
 on:
     push:
+    pull_request:
     workflow_dispatch:
 
 jobs:
@@ -44,31 +46,74 @@ jobs:
             - name: Run PHP-CS-Fixer
               run: tools/php-cs-fixer/vendor/bin/php-cs-fixer fix -vvv --diff --dry-run --allow-risky=yes --ansi
 
-#    test:
-#        name: PHP on ${{ matrix.php }} - ${{ matrix.stability }}
-#        runs-on: ubuntu-latest
-#        strategy:
-#            fail-fast: false
-#            matrix:
-#                php: ['8.3', '8.4']
-#                stability: [prefer-lowest, prefer-stable]
-#        steps:
-#            - name: Checkout code
-#              uses: actions/checkout@v4
-#
-#            - name: Setup PHP
-#              uses: shivammathur/setup-php@v2
-#              with:
-#                  php-version: ${{ matrix.php }}
-#                  extensions: json,zip
-#                  coverage: none
-#                  tools: composer:v2
-#
-#            - name: Check PHP Version
-#              run: php -v
-#
-#            - name: Install dependencies
-#              run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress ${{ matrix.flags }}
-#
-#            - name: Run Unit tests with coverage
-#              run: vendor/bin/phpunit --configuration ./phpunit.xml -- ${{ matrix.phpunit-flags }}
+    test:
+        name: PHP ${{ matrix.php }} - Symfony ${{ matrix.symfony }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                # LTS releases of the 5.x, 6.x and 7.x branches, and the current 8.x release
+                # until 8.4 LTS is out.
+                php: ['8.2', '8.3', '8.4']
+                symfony: ['5.4.*', '6.4.*', '7.4.*', '8.*']
+                exclude:
+                    # Symfony 8 requires PHP 8.4
+                    - php: '8.2'
+                      symfony: '8.*'
+                    - php: '8.3'
+                      symfony: '8.*'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  extensions: json,zip
+                  coverage: none
+                  tools: composer:v2
+
+            - name: Check PHP Version
+              run: php -v
+
+            - name: Pin the Symfony version
+              run: |
+                  composer require --dev --no-update --no-interaction \
+                      "symfony/framework-bundle:${{ matrix.symfony }}" \
+                      "symfony/form:${{ matrix.symfony }}" \
+                      "symfony/validator:${{ matrix.symfony }}" \
+                      "symfony/http-foundation:${{ matrix.symfony }}" \
+                      "symfony/http-client:${{ matrix.symfony }}" \
+                      "symfony/twig-bridge:${{ matrix.symfony }}"
+
+            - name: Install dependencies
+              run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+
+            - name: Run Unit tests
+              run: vendor/bin/phpunit --configuration ./phpunit.xml
+
+    lowest:
+        name: PHP 8.2 - lowest dependencies
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.2'
+                  extensions: json,zip
+                  coverage: none
+                  tools: composer:v2
+
+            # Mirrors the local default (`make update`): proves the declared minimums install
+            # and work, not only the versions that happen to be current. Symfony 5.4 is EOL but
+            # still supported on purpose, so the PHP deprecations its old components raise are
+            # expected — do not turn on --fail-on-deprecation here.
+            - name: Install the lowest supported dependencies
+              run: composer update --prefer-lowest --prefer-stable --prefer-dist --no-interaction --no-progress
+
+            - name: Run Unit tests
+              run: vendor/bin/phpunit --configuration ./phpunit.xml

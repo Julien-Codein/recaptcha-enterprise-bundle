@@ -1,2 +1,9 @@
 vendor/
 tools/*/vendor/
+.php-cs-fixer.cache
+.phpunit.cache/
+composer.lock
+.make/
+.idea/
+.codegraph/
+notes/
