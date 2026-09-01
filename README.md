@@ -25,9 +25,9 @@ Features
 Requirements
 ------------
 
-| Requirement | Supported versions |
-|---|---|
-| PHP | 8.2, 8.3, 8.4 |
+| Requirement | Supported versions             |
+|---|--------------------------------|
+| PHP | 8.1, 8.2, 8.3, 8.4             |
 | Symfony | 5.4 LTS, 6.4 LTS, 7.4 LTS, 8.x |
 
 Every combination is covered by the CI matrix, together with a `--prefer-lowest` build that proves the declared minimums
@@ -371,7 +371,7 @@ $ make cs-fix    # fix the coding standards
 $ make qa        # run all of the above
 ```
 
-The default stack is the lowest supported one, PHP 8.2 with `--prefer-lowest --prefer-stable`, which is what proves
+The default stack is the lowest supported one, PHP 8.1 with `--prefer-lowest --prefer-stable`, which is what proves
 the declared requirements hold. Override it to work against a newer stack:
 
 ```shell
@@ -457,7 +457,7 @@ to do.
 ### Requirements
 
 - Symfony `5.4`, `6.4` and `7.4` are now supported alongside `8.x`; `7.0` to `7.3` are not, the supported 7.x line
-  is the LTS. PHP stays at `^8.2`.
+  is the LTS. PHP stays at `^8.1`.
 - `symfony/http-foundation` is now an explicit requirement. It was already installed in practice, through
   `symfony/framework-bundle`.
 
