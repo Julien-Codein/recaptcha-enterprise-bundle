@@ -343,7 +343,7 @@ Verification is split in two, so that deciding and talking to Google never mix:
 `HttpGateway` is the one implementation, calling the REST Assessments API through Symfony's HTTP client.
 The official `google/cloud-recaptcha-enterprise` SDK is deliberately not used: the bundle makes a single unary call,
 for which the SDK adds only a protobuf and gRPC stack, and its `google/gax` dependency requires
-`ramsey/uuid ^4`, which cannot be installed alongside applications held at `ramsey/uuid` 3.x — Ibexa 4.6 among
+`ramsey/uuid ^4`, which cannot be installed alongside applications held at `ramsey/uuid` 3.x — Ibexa 3.3 among
 them. Another gateway can be added behind the port without the domain noticing.
 
 The gateway throws, rather than returning a failed assessment, whenever Google did not answer with one:
