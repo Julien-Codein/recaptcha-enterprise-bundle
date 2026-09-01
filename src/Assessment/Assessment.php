@@ -10,7 +10,7 @@ namespace Artack\RecaptchaEnterpriseBundle\Assessment;
  * A gateway returns this and nothing else, so no transport type ever reaches the Verifier. An
  * instance means Google answered: a refused token is a value, an unreachable API is an exception.
  */
-final readonly class Assessment
+final class Assessment
 {
     /**
      * @param array<string, mixed> $raw the untouched payload, for logging and application use

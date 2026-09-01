@@ -6,7 +6,7 @@ namespace Artack\RecaptchaEnterpriseBundle\Verifier;
 
 use Artack\RecaptchaEnterpriseBundle\Assessment\InvalidReason;
 
-final readonly class Result
+final class Result
 {
     /**
      * @param bool                 $success whether the token may be accepted, score aside
