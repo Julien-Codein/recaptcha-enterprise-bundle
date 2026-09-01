@@ -65,7 +65,7 @@
             // Several fields on one page share a single loader; a second tag is undefined behaviour.
             if (!document.querySelector('script[data-artack-recaptcha-enterprise]')) {
                 var loader = document.createElement('script');
-                loader.src = 'https://www.google.com/recaptcha/enterprise.js?render={{ recaptcha_render|e('js') }}{% if form.vars.locale %}&hl={{ form.vars.locale|e('js') }}{% endif %}&onload=___artackRecaptchaOnload';
+                loader.src = 'https://www.recaptcha.net/recaptcha/enterprise.js?render={{ recaptcha_render|e('js') }}{% if form.vars.locale %}&hl={{ form.vars.locale|e('js') }}{% endif %}&onload=___artackRecaptchaOnload';
                 loader.async = true;
                 loader.defer = true;
                 loader.setAttribute('data-artack-recaptcha-enterprise', '');
