@@ -1,0 +1,25 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Artack\RecaptchaEnterpriseBundle\Assessment;
+
+/**
+ * What Google answered, in terms the domain understands.
+ *
+ * A gateway returns this and nothing else, so no transport type ever reaches the Verifier. An
+ * instance means Google answered: a refused token is a value, an unreachable API is an exception.
+ */
+final readonly class Assessment
+{
+    /**
+     * @param array<string, mixed> $raw the untouched payload, for logging and application use
+     */
+    public function __construct(
+        public bool $valid,
+        public ?string $action = null,
+        public ?float $score = null,
+        public ?InvalidReason $invalidReason = null,
+        public array $raw = [],
+    ) {}
+}

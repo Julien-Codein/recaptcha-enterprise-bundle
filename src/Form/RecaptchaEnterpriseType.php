@@ -15,9 +15,26 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
  */
 final class RecaptchaEnterpriseType extends AbstractType
 {
+    /**
+     * Invisible: the token is fetched on submit and judged by its risk analysis score.
+     */
+    public const CHALLENGE_SCORE = 'score';
+
+    /**
+     * The "I'm not a robot" checkbox, rendered explicitly so the token lands in this field.
+     */
+    public const CHALLENGE_CHECKBOX = 'checkbox';
+
+    /**
+     * The challenge and the locale are application-wide, not per field: Google supports one
+     * enterprise.js load per page, and its render= and hl= parameters take one value each. The
+     * single site_key already settles the challenge anyway, since the two need different key types.
+     */
     public function __construct(
         private readonly string $siteKey,
         private readonly bool $enabled,
+        private readonly string $challenge = self::CHALLENGE_SCORE,
+        private readonly ?string $locale = null,
     ) {}
 
     public function getParent(): string
@@ -28,9 +45,12 @@ final class RecaptchaEnterpriseType extends AbstractType
     public function buildView(FormView $view, FormInterface $form, array $options): void
     {
         $view->vars['site_key'] = $this->siteKey;
-        $view->vars['action_name'] = $options['action_name'];
         $view->vars['enabled'] = $this->enabled;
-        $view->vars['locale'] = $options['locale'];
+        $view->vars['challenge'] = $this->challenge;
+        $view->vars['action_name'] = $options['action_name'];
+        $view->vars['locale'] = $this->locale;
+        $view->vars['theme'] = $options['theme'];
+        $view->vars['size'] = $options['size'];
         $view->vars['script_csp_nonce'] = $options['script_csp_nonce'];
     }
 
@@ -39,9 +59,17 @@ final class RecaptchaEnterpriseType extends AbstractType
         $resolver->setDefaults([
             'mapped' => false,
             'action_name' => null,
-            'locale' => 'en',
+            'theme' => 'light',
+            'size' => 'normal',
             'script_csp_nonce' => null,
         ]);
+
+        // theme and size are ignored by the score challenge, which renders nothing visible.
+        $resolver->setAllowedValues('theme', ['light', 'dark']);
+        $resolver->setAllowedValues('size', ['normal', 'compact']);
+
+        $resolver->setAllowedTypes('action_name', ['null', 'string']);
+        $resolver->setAllowedTypes('script_csp_nonce', ['null', 'string']);
     }
 
     public function getBlockPrefix(): string
